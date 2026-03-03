@@ -1,10 +1,10 @@
 # MIDI to BDO Converter
 
-Convert standard MIDI files to Black Desert Online's music composer format (v9).
+Convert standard MIDI files to Black Desert Online's music composer format.
 
 ## Features
 
-- Multi-instrument support — automatically maps MIDI channels to BDO instruments
+- Multi-instrument support - automatically maps MIDI channels to BDO instruments
 - GM percussion mapping (drum kit)
 - Sustain pedal support (CC64)
 - Tempo flattening for multi-tempo MIDIs
@@ -12,7 +12,6 @@ Convert standard MIDI files to Black Desert Online's music composer format (v9).
 - Transpose
 - Effector settings (reverb, delay, chorus)
 - Owner ID loading from existing BDO files (for in-game edit access)
-- Dark themed GUI matching BDO's aesthetic
 
 ## Download
 
@@ -36,7 +35,7 @@ No installation or Python required — just run the executable.
 
 To edit your composition in-game, you need to embed your account's owner ID:
 
-1. Save any composition in BDO's music composer (even a blank one)
+1. Save any composition in BDO's music composer
 2. In the converter, click **Load ID from BDO file** and select that saved file
 3. Your character name and owner ID will be loaded automatically
 

@@ -1,8 +1,7 @@
 # MIDI to BDO Converter
 
 Convert standard MIDI files to Black Desert Online's music composer format.
- ![Screenshot](screenshot.png)
-
+![Screenshot](Screenshot.png)
 ## Features
 
 - Multi-instrument support - automatically maps MIDI channels to BDO instruments

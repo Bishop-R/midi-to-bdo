@@ -23,6 +23,9 @@ No installation or Python required — just run the executable.
 
 ## Usage
 
+Place the executable in any folder of your choosing.
+When converting it will create a "midi" and a "converted" folder next to it.
+
 1. Run the executable
 2. Click **Browse** and select a MIDI file
 3. Assign BDO instruments to each detected MIDI channel

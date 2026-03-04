@@ -585,6 +585,36 @@ def stepped_velocity(notes, base=99, step=5):
             for n in notes]
 
 
+# Layer-aware velocity levels based on analysis of well-made BDO compositions.
+# Good composers use discrete steps that avoid harsh sample-switch boundaries.
+BDO_VEL_LEVELS = [80, 90, 100, 121]
+
+
+def layered_velocity(notes, levels=None):
+    """Map velocities to BDO-optimized discrete levels.
+
+    Distributes unique MIDI velocity values evenly across the given levels,
+    preserving relative dynamics while avoiding harsh sample-switch boundaries.
+    """
+    if not notes:
+        return notes
+    if levels is None:
+        levels = BDO_VEL_LEVELS
+    normal_vels = sorted(set(n.vel for n in notes if n.ntype == 0))
+    if not normal_vels:
+        return notes
+    if len(normal_vels) == 1:
+        vel_map = {normal_vels[0]: levels[len(levels) // 2]}
+    else:
+        vel_map = {}
+        for i, v in enumerate(normal_vels):
+            # Map position in the velocity range to position in levels
+            idx = round(i / (len(normal_vels) - 1) * (len(levels) - 1))
+            vel_map[v] = levels[idx]
+    return [n._replace(vel=vel_map.get(n.vel, n.vel)) if n.ntype == 0 else n
+            for n in notes]
+
+
 def transpose_notes(notes, semitones):
     """Shift all note pitches by the given number of semitones."""
     return [n._replace(pitch=n.pitch + semitones) for n in notes]
@@ -614,9 +644,9 @@ def make_track_settings(reverb=0, delay=0, chorus=None):
 
 
 def midi_to_bdo(midi_path, bpm_override=None, char_name='MIDI', vel_range=None,
-                vel_floor=None, vel_step=None, transpose=0, apply_sustain=True,
-                flatten_tempo=False, owner_id=0, instrument_map=None,
-                reverb=0, delay=0, chorus=None):
+                vel_floor=None, vel_step=None, vel_layered=False, transpose=0,
+                apply_sustain=True, flatten_tempo=False, owner_id=0,
+                instrument_map=None, reverb=0, delay=0, chorus=None):
     """Convert a MIDI file to BDO format.
 
     Args:
@@ -655,6 +685,8 @@ def midi_to_bdo(midi_path, bpm_override=None, char_name='MIDI', vel_range=None,
             notes = floor_velocity(notes, vel_floor)
         if vel_step:
             notes = stepped_velocity(notes, vel_step[0], vel_step[1])
+        if vel_layered:
+            notes = layered_velocity(notes)
         if instrument_map is not None:
             inst = instrument_map.get((gm_program, is_perc),
                                       gm_to_bdo_instrument(gm_program, is_perc))

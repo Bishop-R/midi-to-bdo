@@ -289,7 +289,7 @@ class App(ctk.CTk):
         self.char_name = tk.StringVar(value='')
         self.bpm_override = tk.StringVar()
         self.transpose = tk.StringVar(value='0')
-        self.vel_mode = tk.StringVar(value='stepped')
+        self.vel_mode = tk.StringVar(value='layered')
         self.step_base = tk.StringVar(value='100')
         self.step_step = tk.StringVar(value='5')
         self.rescale_min = tk.StringVar(value='80')
@@ -414,7 +414,7 @@ class App(ctk.CTk):
         vel_container.grid(row=row, column=0, columnspan=4, sticky='we', pady=(4, 4), padx=4)
         row += 1
 
-        modes = [('Stepped', 'stepped'), ('Rescale', 'rescale'), ('Floor', 'floor'), ('Off', 'off')]
+        modes = [('Layered', 'layered'), ('Stepped', 'stepped'), ('Rescale', 'rescale'), ('Floor', 'floor'), ('Off', 'off')]
         mode_frame = ctk.CTkFrame(vel, fg_color='transparent')
         mode_frame.grid(row=0, column=0, columnspan=4, sticky='w', **pad)
         ctk.CTkLabel(mode_frame, text="Mode:").pack(side='left', padx=(0, 6))
@@ -422,37 +422,29 @@ class App(ctk.CTk):
             ctk.CTkRadioButton(mode_frame, text=text, variable=self.vel_mode, value=val,
                                command=self._update_vel_fields).pack(side='left', padx=4)
 
-        # Stepped params
-        self._stepped_frame = f1 = ctk.CTkFrame(vel, fg_color='transparent')
-        f1.grid(row=1, column=0, columnspan=4, sticky='w', padx=20)
-        self._step_base_label = ctk.CTkLabel(f1, text="Base:")
-        self._step_base_label.pack(side='left')
-        self._step_base_entry = ctk.CTkEntry(f1, textvariable=self.step_base, width=48)
-        self._step_base_entry.pack(side='left', padx=4)
-        self._step_step_label = ctk.CTkLabel(f1, text="Step:")
-        self._step_step_label.pack(side='left', padx=(8, 0))
-        self._step_step_entry = ctk.CTkEntry(f1, textvariable=self.step_step, width=48)
-        self._step_step_entry.pack(side='left', padx=4)
+        # Velocity param grid — all rows share columns so entries align
+        self._step_base_label = ctk.CTkLabel(vel, text="Base:")
+        self._step_base_label.grid(row=1, column=0, sticky='e', padx=(16, 2), pady=2)
+        self._step_base_entry = ctk.CTkEntry(vel, textvariable=self.step_base, width=48)
+        self._step_base_entry.grid(row=1, column=1, sticky='w', padx=2, pady=2)
+        self._step_step_label = ctk.CTkLabel(vel, text="Step:")
+        self._step_step_label.grid(row=1, column=2, sticky='e', padx=(4, 2), pady=2)
+        self._step_step_entry = ctk.CTkEntry(vel, textvariable=self.step_step, width=48)
+        self._step_step_entry.grid(row=1, column=3, sticky='w', padx=2, pady=2)
 
-        # Rescale params
-        self._rescale_frame = f2 = ctk.CTkFrame(vel, fg_color='transparent')
-        f2.grid(row=2, column=0, columnspan=4, sticky='w', padx=20)
-        self._rescale_min_label = ctk.CTkLabel(f2, text="Min:")
-        self._rescale_min_label.pack(side='left')
-        self._rescale_min_entry = ctk.CTkEntry(f2, textvariable=self.rescale_min, width=48)
-        self._rescale_min_entry.pack(side='left', padx=4)
-        self._rescale_max_label = ctk.CTkLabel(f2, text="Max:")
-        self._rescale_max_label.pack(side='left', padx=(8, 0))
-        self._rescale_max_entry = ctk.CTkEntry(f2, textvariable=self.rescale_max, width=48)
-        self._rescale_max_entry.pack(side='left', padx=4)
+        self._rescale_min_label = ctk.CTkLabel(vel, text="Min:")
+        self._rescale_min_label.grid(row=2, column=0, sticky='e', padx=(16, 2), pady=2)
+        self._rescale_min_entry = ctk.CTkEntry(vel, textvariable=self.rescale_min, width=48)
+        self._rescale_min_entry.grid(row=2, column=1, sticky='w', padx=2, pady=2)
+        self._rescale_max_label = ctk.CTkLabel(vel, text="Max:")
+        self._rescale_max_label.grid(row=2, column=2, sticky='e', padx=(4, 2), pady=2)
+        self._rescale_max_entry = ctk.CTkEntry(vel, textvariable=self.rescale_max, width=48)
+        self._rescale_max_entry.grid(row=2, column=3, sticky='w', padx=2, pady=2)
 
-        # Floor params
-        self._floor_frame = f3 = ctk.CTkFrame(vel, fg_color='transparent')
-        f3.grid(row=3, column=0, columnspan=4, sticky='w', padx=20)
-        self._floor_label = ctk.CTkLabel(f3, text="Min vel:")
-        self._floor_label.pack(side='left')
-        self._floor_entry = ctk.CTkEntry(f3, textvariable=self.floor_val, width=48)
-        self._floor_entry.pack(side='left', padx=4)
+        self._floor_label = ctk.CTkLabel(vel, text="Min vel:")
+        self._floor_label.grid(row=3, column=0, sticky='e', padx=(16, 2), pady=2)
+        self._floor_entry = ctk.CTkEntry(vel, textvariable=self.floor_val, width=48)
+        self._floor_entry.grid(row=3, column=1, sticky='w', padx=2, pady=2)
 
         self._update_vel_fields()
 
@@ -750,6 +742,7 @@ class App(ctk.CTk):
             bdo_data, summary = midi_to_bdo(
                 path, bpm_override=bpm_override, char_name=char_name,
                 vel_range=vel_range, vel_floor=vel_floor_val, vel_step=vel_step_val,
+                vel_layered=(mode == 'layered'),
                 transpose=semitones, apply_sustain=self.apply_sustain.get(),
                 flatten_tempo=self.flatten_tempo.get(),
                 owner_id=self._owner_id,

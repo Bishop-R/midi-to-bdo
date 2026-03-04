@@ -39,7 +39,7 @@ To edit your composition in-game, you need to embed your account's owner ID:
 3. Your character name and owner ID will be loaded automatically
 
 BDO music files are stored in:
-`Documents/Black Desert/GameOption/musicrecord/`
+`Documents/Black Desert/music/`
 
 ## Supported Instruments
 

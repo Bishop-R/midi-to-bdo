@@ -23,7 +23,8 @@ PyInstaller.__main__.run([
     '--windowed',
     '--name', 'MIDI to BDO',
     '--collect-all', 'customtkinter',
-    '--hidden-import', 'ICECipher',
+    '--hidden-import', '_ice',
     '--add-data', f'bdo_theme.json{sep}.',
+    '--distpath', 'release',
     '--noconfirm',
 ])

@@ -306,6 +306,7 @@ class App(ctk.CTk):
         self._tempo_changes = 0
         self._channel_groups = []
         self._inst_combos = []
+        self._vel_scales = []  # per-channel velocity scale sliders
 
         self._build_ui()
 
@@ -400,6 +401,8 @@ class App(ctk.CTk):
         ctk.CTkEntry(sep, textvariable=self.char_name, width=160).grid(row=r, column=1, sticky='w', **pad)
         ctk.CTkButton(sep, text="Load ID from BDO file\u2026",
                       command=self._load_owner_id, width=180).grid(row=r, column=2, sticky='w', **pad)
+        self._owner_id_status = ctk.CTkLabel(sep, text="", text_color=BDO['text_dim'])
+        self._owner_id_status.grid(row=r, column=3, sticky='w', **pad)
         r += 1
         ctk.CTkLabel(sep, text="BPM override:").grid(row=r, column=0, sticky='e', **pad)
         ctk.CTkEntry(sep, textvariable=self.bpm_override, width=64).grid(row=r, column=1, sticky='w', **pad)
@@ -544,21 +547,28 @@ class App(ctk.CTk):
 
     def _load_owner_id(self):
         path = _native_open(
-            title="Select a BDO file you saved in-game",
+            title="Select a single-note BDO file you saved in-game",
             filetypes=[("BDO music files", "*"), ("All files", "*.*")])
         if not path:
             return
         try:
             owner_id, char_name = extract_owner_id(path)
             if owner_id == 0:
-                self.status_text.set("Warning: that file has no owner ID")
+                self._owner_id_status.configure(
+                    text="No owner ID found", text_color=BDO['error'])
                 return
             self._owner_id = owner_id
             if char_name:
                 self.char_name.set(char_name)
-            self.status_text.set(f"Owner ID loaded: 0x{owner_id:08x} ({char_name})")
+            self._owner_id_status.configure(
+                text=f"0x{owner_id:08x} ({char_name})", text_color=BDO['text_dim'])
+        except ValueError:
+            self._owner_id_status.configure(
+                text="File has multiple notes — use a single-note file",
+                text_color=BDO['error'])
         except Exception as exc:
-            self.status_text.set(f"Error reading BDO file: {exc}")
+            self._owner_id_status.configure(
+                text=f"Error: {exc}", text_color=BDO['error'])
 
     def _on_option_toggle(self):
         path = self.midi_path.get()
@@ -639,6 +649,7 @@ class App(ctk.CTk):
         for w in self._instrument_frame.winfo_children():
             w.destroy()
         self._inst_combos = []
+        self._vel_scales = []
 
         if not self._channel_groups:
             ctk.CTkLabel(self._instrument_frame,
@@ -649,28 +660,91 @@ class App(ctk.CTk):
         bdo_names = list(BDO_INSTRUMENT_NAMES.values())
         bdo_id_by_name = {v: k for k, v in BDO_INSTRUMENT_NAMES.items()}
 
+        # "Merge all into" row
+        merge_frame = ctk.CTkFrame(self._instrument_frame, fg_color='transparent')
+        merge_frame.grid(row=0, column=0, columnspan=4, sticky='w', padx=4, pady=(2, 6))
+
+        ctk.CTkLabel(merge_frame, text="Merge all into:",
+                     text_color=BDO['text_dim'],
+                     font=ctk.CTkFont(size=11)).pack(side='left', padx=(2, 4))
+
+        self._merge_combo = ScrollableComboBox(merge_frame, values=bdo_names,
+                                                width=230)
+        self._merge_combo.pack(side='left', padx=(0, 6))
+        self._merge_combo.set(bdo_names[0])
+
+        ctk.CTkButton(merge_frame, text="Apply", width=60,
+                      command=self._merge_all_instruments,
+                      fg_color=BDO['surface'], hover_color=BDO['gold_dark'],
+                      border_width=1, border_color=BDO['border'],
+                      text_color=BDO['text'],
+                      font=ctk.CTkFont(size=11)).pack(side='left')
+
+        # Column headers
+        ctk.CTkLabel(self._instrument_frame, text="Source",
+                     text_color=BDO['gold_light'],
+                     font=ctk.CTkFont(size=11)).grid(
+            row=1, column=0, sticky='w', padx=(6, 8), pady=(2, 4))
+        ctk.CTkLabel(self._instrument_frame, text="Instrument",
+                     text_color=BDO['gold_light'],
+                     font=ctk.CTkFont(size=11)).grid(
+            row=1, column=2, sticky='w', padx=(4, 6), pady=(2, 4))
+        ctk.CTkLabel(self._instrument_frame, text="Volume",
+                     text_color=BDO['gold_light'],
+                     font=ctk.CTkFont(size=11)).grid(
+            row=1, column=3, sticky='w', padx=(8, 2), pady=(2, 4))
+
         for i, (notes, gm_prog, is_perc) in enumerate(self._channel_groups):
+            r = i + 2  # offset by merge row + header row
             if is_perc:
                 label_text = f"Drums (ch 10) ({len(notes)} notes)"
             else:
                 label_text = f"{gm_program_name(gm_prog)} ({len(notes)} notes)"
 
             ctk.CTkLabel(self._instrument_frame, text=label_text).grid(
-                row=i, column=0, sticky='w', padx=(6, 8), pady=2)
+                row=r, column=0, sticky='w', padx=(6, 8), pady=2)
             ctk.CTkLabel(self._instrument_frame, text="\u2192",
                          text_color=BDO['gold_light']).grid(
-                row=i, column=1, padx=4, pady=2)
+                row=r, column=1, padx=4, pady=2)
 
             combo = ScrollableComboBox(self._instrument_frame, values=bdo_names,
                                        width=230)
-            combo.grid(row=i, column=2, sticky='w', padx=(4, 6), pady=2)
+            combo.grid(row=r, column=2, sticky='w', padx=(4, 6), pady=2)
 
             # Set default to auto-mapped instrument
             default_id = gm_to_bdo_instrument(gm_prog, is_perc)
             default_name = BDO_INSTRUMENT_NAMES.get(default_id, bdo_names[0])
             combo.set(default_name)
 
+            # Per-channel velocity scale slider (50% – 200%, default 100%)
+            scale_var = tk.IntVar(value=100)
+            scale_frame = ctk.CTkFrame(self._instrument_frame, fg_color='transparent')
+            scale_frame.grid(row=r, column=3, sticky='w', padx=(8, 2), pady=2)
+
+            slider = ctk.CTkSlider(scale_frame, from_=10, to=200, variable=scale_var,
+                                   orientation='horizontal', width=100,
+                                   number_of_steps=19)
+            slider.pack(side='left')
+
+            val_label = ctk.CTkLabel(scale_frame, text='100%', width=40,
+                                     text_color=BDO['gold_light'],
+                                     font=ctk.CTkFont(size=11))
+            val_label.pack(side='left', padx=(4, 0))
+            scale_var.trace_add('write',
+                                lambda *_, v=scale_var, l=val_label:
+                                    l.configure(text=f'{v.get()}%'))
+
             self._inst_combos.append(combo)
+            self._vel_scales.append(scale_var)
+
+    def _merge_all_instruments(self):
+        """Set all non-drum channels to the selected instrument."""
+        target = self._merge_combo.get()
+        if not target:
+            return
+        for i, (_, _, is_perc) in enumerate(self._channel_groups):
+            if not is_perc:
+                self._inst_combos[i].set(target)
 
     def _convert(self):
         path = self.midi_path.get()
@@ -738,6 +812,15 @@ class App(ctk.CTk):
             if fb or depth or freq:
                 chorus = (fb, depth, freq)
 
+            # Build per-channel velocity scales
+            vel_scales = None
+            if self._vel_scales:
+                vel_scales = {}
+                for i, scale_var in enumerate(self._vel_scales):
+                    pct = scale_var.get()
+                    if pct != 100:
+                        vel_scales[i] = pct / 100.0
+
             bdo_data, summary = midi_to_bdo(
                 path, bpm_override=bpm_override, char_name=char_name,
                 vel_range=vel_range, vel_floor=vel_floor_val, vel_step=vel_step_val,
@@ -747,16 +830,20 @@ class App(ctk.CTk):
                 owner_id=self._owner_id,
                 instrument_map=instrument_map,
                 reverb=self.reverb.get(), delay=self.delay.get(),
-                chorus=chorus)
+                chorus=chorus,
+                vel_scales=vel_scales)
 
             os.makedirs(DEFAULT_OUTDIR, exist_ok=True)
             out_path = os.path.join(DEFAULT_OUTDIR, out_name)
             with open(out_path, 'wb') as f:
                 f.write(bdo_data)
 
-            self.status_text.set(
-                f"Saved: {out_path}  ({len(bdo_data)} bytes, "
-                f"{summary['tracks']} tracks, {summary['total_notes']} notes)")
+            status = (f"Saved: {out_path}  ({len(bdo_data)} bytes, "
+                      f"{summary['tracks']} tracks, {summary['total_notes']} notes)")
+            if summary.get('notes_dropped', 0):
+                status += (f"  WARNING: {summary['notes_dropped']} notes dropped "
+                           f"(10k per-instrument limit)")
+            self.status_text.set(status)
         except Exception as exc:
             self.status_text.set(f"Error: {exc}")
 

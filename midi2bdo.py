@@ -6,17 +6,17 @@ from collections import defaultdict, namedtuple
 import struct
 import os
 import sys
+import warnings
 import mido
-from ICECipher import IceKey
+import _ice
 
 Note = namedtuple('Note', ['pitch', 'vel', 'start', 'dur', 'ntype'])
-
-ICE_KEY = bytes.fromhex('51F30F1104246A00')
 BDO_VERSION = 9
 HEADER_SIZE = 0x150  # Fixed header size before track data
 NAME_FIELD_SIZE = 62  # Each character name field in bytes (31 UTF-16LE chars)
 NOTE_SIZE = 20
 MAX_NOTES_PER_TRACK = 730
+MAX_NOTES_PER_INSTRUMENT = 10000
 DEFAULT_BPM = 120
 DEFAULT_TIME_SIG = 4
 # Track settings: 8 bytes per track
@@ -512,21 +512,26 @@ def build_bdo_binary(bpm, time_sig_num, instrument_groups, char_name='MIDI',
 
 def encrypt_bdo(plaintext):
     """Encrypt the plaintext payload with ICE and prepend the version header."""
-    ice = IceKey(0, ICE_KEY)
-    encrypted = ice.Encrypt(plaintext)
-    return struct.pack('<I', BDO_VERSION) + encrypted
+    return struct.pack('<I', BDO_VERSION) + _ice.encrypt(plaintext)
 
 
 def extract_owner_id(bdo_path):
     """Extract the owner ID and character name from an existing BDO file.
 
+    Only works on single-note files (< 512 bytes payload). This prevents
+    misuse for decrypting full compositions.
+
     Returns:
         (owner_id, char_name) where owner_id is an int and char_name is a str.
+
+    Raises:
+        ValueError: If the file is too large (not a single-note file).
     """
     with open(bdo_path, 'rb') as f:
         data = f.read()
-    ice = IceKey(0, ICE_KEY)
-    plaintext = ice.Decrypt(data[4:])
+    # decrypt_owner_header enforces a 512-byte payload size limit
+    plaintext = _ice.decrypt_owner_header(data[4:])
+
     owner_id = struct.unpack_from('<I', plaintext, 0)[0]
     char_name = plaintext[8:8 + NAME_FIELD_SIZE].decode('utf-16-le', errors='replace').rstrip('\x00')
     return owner_id, char_name
@@ -590,16 +595,27 @@ def stepped_velocity(notes, base=99, step=5):
 BDO_VEL_LEVELS = [80, 90, 100, 121]
 
 
-def layered_velocity(notes, levels=None):
+def layered_velocity(notes, levels=None, scale=1.0):
     """Map velocities to BDO-optimized discrete levels.
 
     Distributes unique MIDI velocity values evenly across the given levels,
     preserving relative dynamics while avoiding harsh sample-switch boundaries.
+
+    Args:
+        notes: List of Note tuples.
+        levels: List of velocity levels to map to.
+        scale: Volume scale factor (0.1–2.0). Controls which subset of levels
+            is used: <1.0 limits to quieter levels, >1.0 biases toward louder.
+            At 1.0 the full range is used.
     """
     if not notes:
         return notes
     if levels is None:
         levels = BDO_VEL_LEVELS
+    # Apply scale by multiplying levels directly, allowing sub-80 velocities
+    if scale != 1.0:
+        levels = sorted(set(max(1, min(127, round(l * scale))) for l in levels))
+
     normal_vels = sorted(set(n.vel for n in notes if n.ntype == 0))
     if not normal_vels:
         return notes
@@ -646,7 +662,8 @@ def make_track_settings(reverb=0, delay=0, chorus=None):
 def midi_to_bdo(midi_path, bpm_override=None, char_name='MIDI', vel_range=None,
                 vel_floor=None, vel_step=None, vel_layered=False, transpose=0,
                 apply_sustain=True, flatten_tempo=False, owner_id=0,
-                instrument_map=None, reverb=0, delay=0, chorus=None):
+                instrument_map=None, reverb=0, delay=0, chorus=None,
+                vel_scales=None):
     """Convert a MIDI file to BDO format.
 
     Args:
@@ -656,6 +673,9 @@ def midi_to_bdo(midi_path, bpm_override=None, char_name='MIDI', vel_range=None,
         reverb: Reverb level 0-127
         delay: Delay level 0-127
         chorus: None or tuple (feedback, lfo_depth, lfo_freq) each 0-127
+        vel_scales: Optional dict {channel_index: float} where float is a
+            velocity scale factor (1.0 = unchanged, 0.5 = half, 2.0 = double).
+            Applied after global velocity processing, before merging.
 
     Returns:
         (bdo_data, summary) where summary is a dict with keys:
@@ -670,7 +690,7 @@ def midi_to_bdo(midi_path, bpm_override=None, char_name='MIDI', vel_range=None,
 
     # Process each channel group and merge by assigned BDO instrument
     merged = defaultdict(list)
-    for notes, gm_program, is_perc in channel_groups:
+    for ch_idx, (notes, gm_program, is_perc) in enumerate(channel_groups):
         if is_perc:
             # Percussion: map GM drum notes to BDO drum pitches + type 99
             notes = map_drum_notes(notes)
@@ -686,13 +706,31 @@ def midi_to_bdo(midi_path, bpm_override=None, char_name='MIDI', vel_range=None,
         if vel_step:
             notes = stepped_velocity(notes, vel_step[0], vel_step[1])
         if vel_layered:
-            notes = layered_velocity(notes)
+            ch_scale = vel_scales.get(ch_idx, 1.0) if vel_scales else 1.0
+            notes = layered_velocity(notes, scale=ch_scale)
+        elif vel_scales and ch_idx in vel_scales:
+            # Non-layered modes: apply raw scaling
+            scale = vel_scales[ch_idx]
+            notes = [n._replace(vel=max(1, min(127, round(n.vel * scale))))
+                     for n in notes]
         if instrument_map is not None:
             inst = instrument_map.get((gm_program, is_perc),
                                       gm_to_bdo_instrument(gm_program, is_perc))
         else:
             inst = gm_to_bdo_instrument(gm_program, is_perc)
         merged[inst].extend(notes)
+
+    # Enforce per-instrument note limit (BDO's in-game limit)
+    notes_dropped = 0
+    for inst in merged:
+        if len(merged[inst]) > MAX_NOTES_PER_INSTRUMENT:
+            merged[inst].sort(key=lambda n: n.start)
+            dropped = len(merged[inst]) - MAX_NOTES_PER_INSTRUMENT
+            merged[inst] = merged[inst][:MAX_NOTES_PER_INSTRUMENT]
+            notes_dropped += dropped
+            inst_name = BDO_INSTRUMENT_NAMES.get(inst, f'0x{inst:02x}')
+            warnings.warn(f"{inst_name}: {dropped} notes dropped "
+                          f"(10k per-instrument limit)")
 
     # Build instrument groups: [(inst_id, [track_note_lists]), ...]
     instrument_groups = []
@@ -733,6 +771,7 @@ def midi_to_bdo(midi_path, bpm_override=None, char_name='MIDI', vel_range=None,
         'total_notes': total_notes,
         'instruments': len(instrument_groups),
         'track_details': track_details,
+        'notes_dropped': notes_dropped,
     }
 
     track_settings = make_track_settings(reverb, delay, chorus)
@@ -806,6 +845,8 @@ def main():
 
     print(f"BPM: {summary['bpm']}, Time sig: {summary['time_sig']}/4")
     print(f"Tracks: {summary['tracks']}, Total notes: {summary['total_notes']}")
+    if summary.get('notes_dropped', 0):
+        print(f"  WARNING: {summary['notes_dropped']} notes dropped (10k per-instrument limit)")
     for i, td in enumerate(summary['track_details']):
         if td['notes']:
             print(f"  Track {i}: {td['notes']} notes, "
